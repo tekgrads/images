@@ -4,15 +4,16 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 # Load contacts
-contacts = pd.read_excel(r"C:\Users\rajes\OneDrive\Documents\GitHub\images\tekgrads\contacts_2.xlsx")
+contacts = pd.read_excel(r"C:\Users\rajes\OneDrive\Documents\GitHub\images\tekgrads\contacts.xlsx")
 
-# Email setup
+# Email credentials
 sender_email = "tekgrads@gmail.com"
 password = "gyfd tmhd kchk rrri"
 
-# Subject
+# Subject template
 subject = "{Name} One Internship. One Chance. One Way to Get Hired."
 
 # HTML body template
@@ -145,43 +146,54 @@ body_template = """
   </div>
 </body>
 </html>
-"""
+"""  # For brevity, keep the same HTML here
 
-# Attachments
+# Attachments to be sent with every email
 attachments = [
     r"C:\Users\rajes\OneDrive\Documents\GitHub\images\tekgrads\Internshift-CTC-Presentation.pdf",
     r"C:\Users\rajes\OneDrive\Documents\GitHub\images\tekgrads\TekGrads-Brochure.pdf",
     r"C:\Users\rajes\OneDrive\Documents\GitHub\images\tekgrads\tekgrads-internship-handout.jpeg"
 ]
 
-# Setup SMTP
-server = smtplib.SMTP("smtp.gmail.com", 587)
-server.starttls()
-server.login(sender_email, password)
+# Load attachments only once to avoid reading them repeatedly
+attachment_parts = []
+for file_path in attachments:
+    with open(file_path, "rb") as f:
+        part = MIMEApplication(f.read(), Name=os.path.basename(file_path))
+        part["Content-Disposition"] = f'attachment; filename="{os.path.basename(file_path)}"'
+        attachment_parts.append(part)
 
-# Loop through contacts
-for index, row in contacts.iterrows():
-    msg = MIMEMultipart('related')
-    msg["From"] = sender_email
-    msg["To"] = row["Email ID"]
-    msg["Subject"] = subject.format(Name=row["Name"])
+# Function to send individual email
+def send_email(row):
+    try:
+        msg = MIMEMultipart('related')
+        msg["From"] = sender_email
+        msg["To"] = row["Email ID"]
+        msg["Subject"] = subject.format(Name=row["Name"])
 
-    msg_alternative = MIMEMultipart('alternative')
-    msg.attach(msg_alternative)
+        msg_alternative = MIMEMultipart('alternative')
+        msg.attach(msg_alternative)
 
-    # Personalize HTML
-    html_content = body_template.format(Name=row["Name"])
-    msg_alternative.attach(MIMEText(html_content, "html"))
+        # Personalize and attach HTML content
+        html_content = body_template.format(Name=row["Name"])
+        msg_alternative.attach(MIMEText(html_content, "html"))
 
-    # Attach files
-    for file_path in attachments:
-        with open(file_path, "rb") as f:
-            part = MIMEApplication(f.read(), Name=os.path.basename(file_path))
-            part["Content-Disposition"] = f'attachment; filename="{os.path.basename(file_path)}"'
+        # Attach files
+        for part in attachment_parts:
             msg.attach(part)
 
-    # Send email
-    server.send_message(msg)
+        # Send via SMTP
+        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+            smtp.starttls()
+            smtp.login(sender_email, password)
+            smtp.send_message(msg)
 
-server.quit()
-print("✅ All emails sent successfully!")
+        print(f"✅ Email sent to {row['Name']} ({row['Email ID']})")
+    except Exception as e:
+        print(f"❌ Failed to send to {row['Name']} ({row['Email ID']}): {e}")
+
+# Send emails in parallel (adjust number of workers based on performance)
+with ThreadPoolExecutor(max_workers=5) as executor:
+    executor.map(send_email, [row for _, row in contacts.iterrows()])
+
+print("🎉 All emails processed.")
